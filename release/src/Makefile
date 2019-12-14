@@ -1085,6 +1085,10 @@ z:
 	@$(MAKE) bin USB="USB" B=E NTFS=y EBTABLES=y MULTIWAN=y IPV6SUPP=y USBEXTRAS=y BCMNAT=y OPENVPN=y PPTPD=y \
 	    BBEXTRAS=y MEDIASRV=y DNSCRYPT=y STUBBY=y NOCAT=y TOR=y BTCLIENT=y NFS=y SNMP=y UPS=y TR_EXTRAS=y IPSEC=y DNSSEC=y TINC=y NANO=y HFS=y NGINX=y IPERF=y TERMLIB=y KEYGEN=y BUILD_DESC="AIO"
 
+## Tokamak's Custom Build - minimal router services
+tokamak:
+	@$(MAKE) bin USB="USB" B=E NTFS=y EBTABLES=y MULTIWAN=y IPV6SUPP=y USBEXTRAS=y BCMNAT=y OPENVPN=y PPTPD=y BBEXTRAS=y MEDIASRV=n DNSCRYPT=y STUBBY=y NOCAT=y NO_SAMBA=y NO_USBAPP=y TOR=n BTCLIENT=n NFS=n SNMP=y UPS=n TR_EXTRAS=n IPSEC=y DNSSEC=y TINC=y NANO=y HFS=y NGINX=n IPERF=y TERMLIB=y KEYGEN=y BUILD_DESC="Tokamak"
+
 
 #################################
 
@@ -1321,12 +1325,18 @@ f9k:
 
 ## Builds for Asus RT-N66u with 64k NVRAM support
 ifeq ($(CONFIG_BCMWL6),y)
+r64tokamak:
+	@$(MAKE) tokamak MIPS32=r2 NVRAM_64K=y MICROSD=y ASUS_TRX="RT-N66U" UFSD=y
+
 r64z:
 	@$(MAKE) z MIPS32=r2 NVRAM_64K=y MICROSD=y ASUS_TRX="RT-N66U" UFSD=y
 
 r64e:
 	@$(MAKE) e MIPS32=r2 NVRAM_64K=y MICROSD=y ASUS_TRX="RT-N66U" UFSD=y
 else
+r64tokamak:
+	@$(MAKE) tokamak MIPS32=r2 NVRAM_64K=y MICROSD=y
+
 r64z:
 	@$(MAKE) z MIPS32=r2 NVRAM_64K=y MICROSD=y
 
@@ -1526,6 +1536,7 @@ help:
 	@echo ""
 	@echo "r64e         Asus RT-N66u build VPN"
 	@echo "r64z         Asus RT-N66u build AIO"
+	@echo "r64tokamak   Asus RT-N66u build Tokamak"
 ifeq ($(CONFIG_BCMWL6),y)
 	@echo ""
 	@echo "ac66e        Asus RT-AC66u build VPN"
