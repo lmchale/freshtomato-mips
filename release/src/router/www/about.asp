@@ -284,7 +284,7 @@ We want to express our gratitude to all people not mentioned here but contribute
 Copyright (C) 2016-2019 FreshTomato team
 <br/>
 <br/>
-Built on <% build_time(); %> by Pedro
+Built on <% build_time(); %> by Tokamak
 <br/>
 <br/>
 <br/>
