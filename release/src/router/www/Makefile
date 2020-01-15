@@ -179,6 +179,7 @@ ifneq ($(TCONFIG_TOR),y)
 	rm -f $(INSTALLDIR)/www/advanced-tor.asp
 	sed -i $(INSTALLDIR)/www/tomato.js -e "/TOR-BEGIN/,/TOR-END/d"
 	sed -i $(INSTALLDIR)/www/about.asp -e "/TOR-BEGIN/,/TOR-END/d"
+	sed -i $(INSTALLDIR)/www/advanced-dhcpdns.asp -e "/TOR-BEGIN/,/TOR-END/d"
 endif
 
 # Only include the USB and NAS pages if USB Support is configured in.
@@ -222,7 +223,7 @@ endif
 
 	cd $(INSTALLDIR)/www && \
 	for F in $(wildcard *.asp); do \
-		sed -e "s,<div class=\"version\">Version <% version(); %></div>,<div class=\"version\">Version <% version(); %> by FreshTomato team</div>," $$F > $$F.tmp; \
+		sed -e "s,<div class=\"version\">Version <% version(); %></div>,<div class=\"version\">Version <% version(); %> on <% nv(\"t_model_name\"); %></div>," $$F > $$F.tmp; \
 		mv $$F.tmp $$F; \
 	done
 
@@ -322,6 +323,9 @@ endif
 # Only include the https option if it is compiled in
 ifneq ($(TCONFIG_HTTPS),y)
 	sed -i $(INSTALLDIR)/www/admin-access.asp -e "/HTTPS-BEGIN/,/HTTPS-END/d"
+	sed -i $(INSTALLDIR)/www/basic-ddns.asp -e "/HTTPS-BEGIN/,/HTTPS-END/d"
+else
+	sed -i $(INSTALLDIR)/www/basic-ddns.asp -e "/HTTPS0-BEGIN/,/HTTPS0-END/d"
 endif
 
 # Only include the TLS keys generator option if it is compiled in
@@ -350,6 +354,11 @@ ifeq ($(TCONFIG_OPTIMIZE_SIZE_MORE),y)
 	sed -i $(INSTALLDIR)/www/vpn-client.asp -e "/SIZEOPTMORE-BEGIN/,/SIZEOPTMORE-END/d"
 	sed -i $(INSTALLDIR)/www/vpn-server.asp -e "/SIZEOPTMORE-BEGIN/,/SIZEOPTMORE-END/d"
 endif
+endif
+
+# Only include "Remote Forwarding" if special size optimization is not required
+ifeq ($(TCONFIG_OPTIMIZE_SIZE_MORE),y)
+	sed -i $(INSTALLDIR)/www/admin-access.asp -e "/SIZEOPTMORE-BEGIN/,/SIZEOPTMORE-END/d"
 endif
 
 # Clean-up compiler directives
@@ -391,6 +400,7 @@ endif
 		-e "/MULTIWAN-BEGIN/d"	-e "/MULTIWAN-END/d"\
 		-e "/DUALWAN-BEGIN/d"	-e "/DUALWAN-END/d"\
 		-e "/HTTPS-BEGIN/d"	-e "/HTTPS-END/d"\
+		-e "/HTTPS0-BEGIN/d"	-e "/HTTPS0-END/d"\
 		-e "/KEYGEN-BEGIN/d"	-e "/KEYGEN-END/d"\
 		-e "/TERMLIB-BEGIN/d"	-e "/TERMLIB-END/d"\
 		-e "/TERMLIB0-BEGIN/d"	-e "/TERMLIB0-END/d"\

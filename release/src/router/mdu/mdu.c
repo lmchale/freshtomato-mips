@@ -7,7 +7,7 @@
 
 */
 
-//	#define DEBUG
+//#define MDU_DEBUG
 #define _GNU_SOURCE
 
 #include <unistd.h>
@@ -24,38 +24,51 @@
 #include <stdarg.h>
 #include <sys/stat.h>
 #include <time.h>
+#include <syslog.h>
 
 #include <shared.h>
 #include <shutils.h>
 #include <tomato_version.h>
 
-#include "mssl.h"
-
-
-
-#ifdef DEBUG
-#define AGENT		"MDU - TEST DDNS CLIENT"
+#ifdef USE_LIBCURL
+#include <curl/curl.h>
 #else
-#define AGENT		"MDU - FreshTomato Firmware " TOMATO_MAJOR "." TOMATO_MINOR
+#include "mssl.h"
 #endif
 
+#ifdef MDU_DEBUG
+/* Line number as text string */
+#define __LINE_T__ __LINE_T_(__LINE__)
+#define __LINE_T_(x) __LINE_T(x)
+#define __LINE_T(x) # x
+#define mdulog(level, x...) syslog(level, __LINE_T__ ": " x)
+#else
+#define mdulog(level, x...) do { } while(0)
+#endif
+
+#define AGENT			"MDU - FreshTomato Firmware - " TOMATO_MAJOR "." TOMATO_MINOR
 #define MAX_OPTION_LENGTH	256
-#define BLOB_SIZE	(4 * 1024)
-#define HALF_BLOB	(BLOB_SIZE >> 1)
-#define QUARTER_BLOB	(BLOB_SIZE >> 2)
+#define BLOB_SIZE		(4 * 1024)
+#define HALF_BLOB		(BLOB_SIZE >> 1)
+#define QUARTER_BLOB		(BLOB_SIZE >> 2)
 
+#define M_UNKNOWN_ERROR__D	"Unknown error (%d)."
+#define M_UNKNOWN_RESPONSE__D	"Unknown response (%d)."
+#define M_INVALID_HOST		"Invalid hostname."
+#define M_INVALID_AUTH		"Invalid authentication."
+#define M_INVALID_PARAM__D	"Invalid parameter (%d)."
+#define M_INVALID_PARAM__S	"Invalid parameter (%s)."
+#define M_TOOSOON		"Update was too soon or too frequent. Please try again later."
+#define M_ERROR_GET_IP		"Error obtaining IP address."
+#define M_SAME_IP		"The IP address is the same."
+#define M_SAME_RECORD		"Record already up-to-date."
+#define M_DOWN			"Server temporarily down or under maintenance."
 
-#define M_UNKNOWN_ERROR__D		"Unknown error (%d)."
-#define M_UNKNOWN_RESPONSE__D		"Unknown response (%d)."
-#define M_INVALID_HOST			"Invalid hostname."
-#define M_INVALID_AUTH			"Invalid authentication."
-#define M_INVALID_PARAM__D		"Invalid parameter (%d)."
-#define M_INVALID_PARAM__S		"Invalid parameter (%s)."
-#define M_TOOSOON			"Update was too soon or too frequent. Please try again later."
-#define M_ERROR_GET_IP			"Error obtaining IP address."
-#define M_SAME_IP			"The IP address is the same."
-#define M_SAME_RECORD			"Record already up-to-date."
-#define M_DOWN				"Server temporarily down or under maintenance."
+#ifdef USE_LIBCURL
+int curl_sslerr = 1;
+FILE *curl_dfile = NULL;
+CURL *curl_handle = NULL;
+#endif
 
 char *blob = NULL;
 int error_exitcode = 1;
@@ -134,13 +147,6 @@ static const char *get_option(const char *name)
 	return NULL;
 }
 
-/*
-static const char *get_option_safe(const char *name)
-{
-	return get_option(name) ? : "";
-}
-*/
-
 static const char *get_option_required(const char *name)
 {
 	const char *p;
@@ -186,7 +192,7 @@ static void error(const char *fmt, ...)
 	s[sizeof(s) - 1] = 0;
 	va_end(args);
 
-	_dprintf("%s: %s\n", __FUNCTION__, s);
+	mdulog(LOG_INFO, "%s: %s\n", __FUNCTION__, s);
 
 	printf("%s\n", s);
 	save_msg(s);
@@ -197,7 +203,7 @@ static void success_msg(const char *msg)
 {
 	save_cookie();
 
-	_dprintf("%s\n", __FUNCTION__);
+	mdulog(LOG_INFO, "%s\n", __FUNCTION__);
 
 	printf("%s\n", msg);
 	save_msg(msg);
@@ -211,13 +217,158 @@ static void success(void)
 
 static const char *get_dump_name(void)
 {
-#ifdef DEBUG
+#ifdef MDU_DEBUG
 	return get_option_or("dump", "/tmp/mdu.txt");
 #else
 	return get_option("dump");
 #endif
 }
 
+#ifdef USE_LIBCURL
+static int curl_dump(CURL *handle, curl_infotype type, char *data, size_t size,
+		void *userptr)
+{
+	const char *prefix;
+	FILE *f_out;
+	size_t i;
+	unsigned char c;
+	int is_info;
+
+	is_info = 0;
+	switch (type)
+	{
+		case CURLINFO_HEADER_OUT:
+			prefix = ">H ";
+			break;
+		case CURLINFO_DATA_OUT:
+			prefix = ">D ";
+			break;
+		case CURLINFO_HEADER_IN:
+			prefix = "<H ";
+			break;
+		case CURLINFO_DATA_IN:
+			prefix = "<D ";
+			break;
+		case CURLINFO_TEXT:
+			prefix = "=I ";
+			is_info = 1;
+			break;
+		default:
+			return 0;
+	}
+
+	// pretty up a bit
+	if (is_info)
+	{
+		if (data[size - 1] == '\n')
+			size -= 1;
+		if (data[size - 1] == ':')
+			size -= 1;
+	}
+	else if (data[size - 2] == '\r' && data[size-1] == '\n')
+		size -= 2;
+
+	f_out = (FILE *)userptr;
+	fputs(prefix, f_out);
+
+	c = 0;
+	for (i = 0; i < size; ++i)
+	{
+		c = data[i];
+		if (c == '\r' && !is_info)
+			fputc('\n', f_out);
+		else if (c == '\n')
+		{
+			if (is_info)
+				fputc('\n', f_out);
+			fputs(prefix, f_out);
+		}
+		else
+			fputc((c >= 0x20 && c < 0x80) ? c : '.', f_out);
+	}
+	fputc('\n', f_out);
+
+	return 0;
+}
+
+static void curl_setup()
+{
+	CURLsslset result;
+	const char *dump;
+
+	result = curl_global_sslset(CURLSSLBACKEND_OPENSSL, NULL, NULL);
+	if (result == CURLSSLSET_OK || result == CURLSSLSET_TOO_LATE)
+		curl_sslerr = 0;
+	if (curl_global_init(CURL_GLOBAL_ALL) || !(curl_handle = curl_easy_init()))
+		error("libcurl initialization failure.");
+
+	curl_easy_setopt(curl_handle, CURLOPT_FOLLOWLOCATION, 1);
+	curl_easy_setopt(curl_handle, CURLOPT_MAXREDIRS, 20);
+	curl_easy_setopt(curl_handle, CURLOPT_CONNECTTIMEOUT, 10);
+	curl_easy_setopt(curl_handle, CURLOPT_TIMEOUT, 10);
+
+	if ((dump = get_dump_name()) != NULL)
+	{
+		curl_easy_setopt(curl_handle, CURLOPT_VERBOSE, 1L);
+		if ((curl_dfile = fopen(dump, "a")) != NULL)
+		{
+			curl_easy_setopt(curl_handle, CURLOPT_DEBUGFUNCTION, curl_dump);
+			curl_easy_setopt(curl_handle, CURLOPT_DEBUGDATA, (void *)curl_dfile);
+		}
+	}
+}
+
+static void curl_cleanup()
+{
+	if (curl_dfile != NULL)
+		fclose(curl_dfile);
+	curl_easy_cleanup(curl_handle);
+	curl_global_cleanup();
+}
+
+static struct curl_slist *curl_headers(const char *header)
+{
+	char *sub;
+	struct curl_slist *headers = NULL;
+	struct curl_slist *tmp = NULL;
+	size_t n = strlen(header);
+
+	if (!header)
+		return NULL;
+
+	sub = strstr(header, "\r\n");
+	while (sub || n > 0)
+	{
+		if (sub)
+			*sub = 0;
+		if (header)
+		{
+			tmp = curl_slist_append(headers, header);
+			if (tmp == NULL)
+			{
+				curl_slist_free_all(headers);
+				curl_cleanup();
+				error("libcurl header failure.");
+			}
+		}
+		if (sub)
+		{
+			n -= sub + 2 - header;
+			headers = tmp;
+			header = sub + 2;
+			*sub = '\r';
+			sub = strstr(header, "\r\n");
+		}
+		else
+		{
+			n = 0;
+			headers = tmp;
+		}
+	}
+
+	return headers;
+}
+#else
 static int _http_req(int ssl, const char *host, int port, const char *request, char *buffer, int bufsize, char **body)
 {
 	struct hostent *he;
@@ -230,12 +381,12 @@ static int _http_req(int ssl, const char *host, int port, const char *request, c
 	const char *c;
 	struct timeval tv;
 
-	_dprintf("\n*** %s\n", host);
+	mdulog(LOG_INFO, "\n*** %s\n", host);
 
 	sd = -1;	// for gcc warning
 
 	for (trys = 4; trys > 0; --trys) {
-		_dprintf("_http_req trys=%d\n", trys);
+		mdulog(LOG_INFO, "_http_req trys=%d\n", trys);
 
 		for (i = 4; i > 0; --i) {
 			if ((he = gethostbyname(host)) != NULL) {
@@ -247,19 +398,19 @@ static int _http_req(int ssl, const char *host, int port, const char *request, c
 				sa.sin_port = htons(port);
 				memcpy(&sa.sin_addr, he->h_addr, sizeof(sa.sin_addr));
 
-#ifdef DEBUG
+#ifdef MDU_DEBUG
 				struct in_addr ia;
 				ia.s_addr = sa.sin_addr.s_addr;
 
-				_dprintf("[%s][%d]\n", inet_ntoa(ia), port);
-				_dprintf("connecting...\n");
+				mdulog(LOG_INFO, "[%s][%d]\n", inet_ntoa(ia), port);
+				mdulog(LOG_INFO, "connecting...\n");
 #endif
 
 				if (connect_timeout(sd, (struct sockaddr *)&sa, sizeof(sa), 10) == 0) {
-					_dprintf("connected\n");
+					mdulog(LOG_INFO, "connected\n");
 					break;
 				}
-#ifdef DEBUG
+#ifdef MDU_DEBUG
 				perror("connect");
 #endif
 				close(sd);
@@ -281,30 +432,30 @@ static int _http_req(int ssl, const char *host, int port, const char *request, c
 			f = fdopen(sd, "r+");
 		}
 		if (f == NULL) {
-			_dprintf("error opening\n");
+			mdulog(LOG_INFO, "error opening\n");
 			close(sd);
 			continue;
 		}
 
 		i = strlen(request);
 		if (fwrite(request, 1, i, f) != i) {
-			_dprintf("error writing i=%d\n", i);
+			mdulog(LOG_INFO, "error writing i=%d\n", i);
 			fclose(f);
 			close(sd);
 			continue;
 		}
-		_dprintf("sent request\n");
+		mdulog(LOG_INFO, "sent request\n");
 
 		i = fread(buffer, 1, bufsize, f);
 		if (i <= 0) {
 			fclose(f);
 			close(sd);
-			_dprintf("error reading i=%d\n", i);
+			mdulog(LOG_INFO, "error reading i=%d\n", i);
 			continue;
 		}
 		buffer[i] = 0;
 
-		_dprintf("recvd=[%s], i=%d\n", buffer, i);
+		mdulog(LOG_INFO, "recvd=[%s], i=%d\n", buffer, i);
 
 		fclose(f);
 		close(sd);
@@ -321,27 +472,118 @@ static int _http_req(int ssl, const char *host, int port, const char *request, c
 		}
 
 		if ((sscanf(buffer, "HTTP/1.%*d %d", &i) == 1) && (i >= 100) && (i <= 999)) {
-			_dprintf("HTTP/1.* i=%d\n", i);
+			mdulog(LOG_INFO, "HTTP/1.* i=%d\n", i);
 			if ((p = strstr(buffer, "\r\n\r\n")) != NULL) p += 4;
 				else if ((p = strstr(buffer, "\n\n")) != NULL) p += 2;
 			if (p) {
 				if (body) {
 					*body = p;
-					_dprintf("body=[%s]\n", p);
+					mdulog(LOG_INFO, "body=[%s]\n", p);
 				}
 				return i;
 			}
 			else {
-				_dprintf("!p\n");
+				mdulog(LOG_INFO, "!p\n");
 			}
 		}
 	}
 
 	return -1;
 }
+#endif
 
 static int http_req(int ssl, int static_host, const char *host, const char *req, const char *query, const char *header, int auth, char *data, char **body)
 {
+#ifdef USE_LIBCURL
+	struct curl_slist *headers = NULL;
+	char url[HALF_BLOB];
+	FILE *curl_wbuf = NULL;
+	FILE *curl_rbuf = NULL;
+	CURLcode r;
+	int trys;
+	long code;
+
+	if (!static_host) host = get_option_or("server", host);
+	if (ssl)
+	{
+		if (curl_sslerr)
+		{
+			curl_cleanup();
+			error("SSL failure with libcurl.");
+		}
+		snprintf(url, HALF_BLOB, "https://%s%s", host, query);
+	}
+	else
+		snprintf(url, HALF_BLOB, "http://%s%s", host, query);
+
+	curl_easy_setopt(curl_handle, CURLOPT_URL, url);
+	if (header) {
+		headers = curl_headers(header);
+	}
+	else {
+		headers = curl_headers("User-Agent: " AGENT);
+	}
+	curl_easy_setopt(curl_handle, CURLOPT_HTTPHEADER, headers);
+
+	if (auth) {
+		curl_easy_setopt(curl_handle, CURLOPT_USERNAME, get_option_required("user"));
+		curl_easy_setopt(curl_handle, CURLOPT_PASSWORD, get_option_required("pass"));
+		curl_easy_setopt(curl_handle, CURLOPT_HTTPAUTH, CURLAUTH_BASIC);
+	}
+	else
+		curl_easy_setopt(curl_handle, CURLOPT_HTTPAUTH, CURLAUTH_NONE);
+
+	curl_wbuf = fmemopen(blob, HALF_BLOB, "w");
+	setbuf(curl_wbuf, NULL);
+	curl_easy_setopt(curl_handle, CURLOPT_WRITEDATA, (void *)curl_wbuf);
+	if (data)
+	{
+		curl_rbuf = fmemopen(data, strlen(data), "r");
+		curl_easy_setopt(curl_handle, CURLOPT_READDATA, (void *)curl_rbuf);
+		curl_easy_setopt(curl_handle, CURLOPT_INFILESIZE, strlen(data));
+		curl_easy_setopt(curl_handle, CURLOPT_UPLOAD, 1L);
+	}
+	else
+	{
+		curl_easy_setopt(curl_handle, CURLOPT_READDATA, NULL);
+		curl_easy_setopt(curl_handle, CURLOPT_INFILESIZE, 0);
+		curl_easy_setopt(curl_handle, CURLOPT_UPLOAD, 0L);
+	}
+
+	if (!strcmp(req, "POST"))
+		curl_easy_setopt(curl_handle, CURLOPT_POST, 1L);
+	else if (!strcmp(req, "GET"))
+		curl_easy_setopt(curl_handle, CURLOPT_HTTPGET, 1L);
+
+	for (trys = 4; trys > 0; --trys)
+	{
+		r = curl_easy_perform(curl_handle);
+		if (r != CURLE_COULDNT_CONNECT)
+			break;
+#ifdef MDU_DEBUG
+		perror("connect");
+#endif
+		sleep(2);
+	}
+	curl_slist_free_all(headers);
+	curl_easy_getinfo(curl_handle, CURLINFO_RESPONSE_CODE, &code);
+	fclose(curl_wbuf);
+	if (curl_rbuf)
+		fclose(curl_rbuf);
+	if (curl_dfile)
+	{
+		fputc('\n', curl_dfile);
+		fflush(curl_dfile);
+	}
+	if (r != CURLE_OK)
+	{
+		curl_cleanup();
+		error("Unknown libcurl error %d with response code %ld.", r, code);
+	}
+
+	*body = blob;
+	return code;
+#else
 	char *p;
 	int port;
 	char a[512];
@@ -369,7 +611,7 @@ static int http_req(int ssl, int static_host, const char *host, const char *req,
 		req, query, httpv, host);
 	if (auth) {
 		sprintf(a, "%s:%s", get_option_required("user"), get_option_required("pass"));
-		n = base64_encode((unsigned char *) a, b, strlen(a));
+		n = base64_encode((const char *) a, b, strlen(a));
 		b[n] = 0;
 		sprintf(blob + strlen(blob), "Authorization: Basic %s\r\n", b);
 	}
@@ -379,13 +621,13 @@ static int http_req(int ssl, int static_host, const char *host, const char *req,
 	}
 	if (data)
 		sprintf(blob + strlen(blob), "Content-Length: %d\r\n", strlen(data));
+
 	strcat(blob, "\r\n");
 
 	if (data)
 		strcat(blob, data);
 
-
-	_dprintf("blob=[%s]\n", blob);
+	mdulog(LOG_INFO, "blob=[%s]\n", blob);
 
 	port = ssl ? 443 : 80;
 	strlcpy(a, host, sizeof(a));
@@ -398,8 +640,10 @@ static int http_req(int ssl, int static_host, const char *host, const char *req,
 	n = _http_req(ssl, a, port, p, blob, BLOB_SIZE, body);
 	free(p);
 
-	_dprintf("%s: n=%d\n", __FUNCTION__, n);
+	mdulog(LOG_INFO, "%s: n=%d\n", __FUNCTION__, n);
+
 	return n;
+#endif
 }
 
 static int wget(int ssl, int static_host, const char *host, const char *get, const char *header, int auth, char **body)
@@ -413,11 +657,11 @@ int read_tmaddr(const char *name, long *tm, char *addr)
 
 	if (f_read_string(name, s, sizeof(s)) > 0) {
 		if (sscanf(s, "%ld,%15s", tm, addr) == 2) {
-			_dprintf("%s: s=%s tm=%ld addr=%s\n", __FUNCTION__, s, *tm, addr);
+			mdulog(LOG_INFO, "%s: s=%s tm=%ld addr=%s\n", __FUNCTION__, s, *tm, addr);
 			if ((tm > 0) && (inet_addr(addr) != -1)) return 1;
 		}
 		else {
-			_dprintf("%s: unknown=%s\n", __FUNCTION__, s);
+			mdulog(LOG_INFO, "%s: unknown=%s\n", __FUNCTION__, s);
 		}
 	}
 	return 0;
@@ -440,72 +684,65 @@ const char *get_address(int required)
 			if ((*c != 0) && (strlen(c) < 20)) {
 				ut = get_uptime();
 
-				if ((d = get_option("addrcache")) != NULL) strlcpy(cache_name, d, sizeof(cache_name));
-					else sprintf(cache_name, "%s.ip", c);
+				if ((d = get_option("addrcache")) != NULL)
+					strlcpy(cache_name, d, sizeof(cache_name));
+				else
+					sprintf(cache_name, "%s.ip", c);
+
 				if (read_tmaddr(cache_name, &et, addr)) {
 					if ((et > ut) && ((et - ut) <= (10 * 60))) {
-						_dprintf("%s: Using cached address %s from %s. Expires in %ld seconds.\n", __FUNCTION__, addr, cache_name, et - ut);
+						mdulog(LOG_INFO, "%s: Using cached address %s from %s. Expires in %ld seconds.\n", __FUNCTION__, addr, cache_name, et - ut);
 						return addr;
 					}
 				}
 
+				/* main IP checker */
 				if (strcmp(c, "dyndns") == 0) {
-					if ((wget(0, 1, "checkip.dyndns.org:8245", "/", NULL, 0, &body) != 200) &&
-						(wget(0, 1, "checkip.dyndns.org", "/", NULL, 0, &body) != 200)) {
-						// Current IP Address: 1.2.3.4
+					if ((wget(0, 1, "checkip.dyndns.org:8245", "/", NULL, 0, &body) != 200) && (wget(0, 1, "checkip.dyndns.org", "/", NULL, 0, &body) != 200)) {
+						/* "<html><head><title>Current IP Check</title></head><body>Current IP Address: 1.2.3.4</body></html>" */
 						error(M_ERROR_GET_IP);
 					}
 				}
-				else if (strcmp(c, "zoneedit") == 0 || strcmp(c, "szoneedit") == 0) {
+				/* other IP checkers - see/add/remove: rc/ddns.c */
+				else if (strcmp(c, "zoneedit") == 0) {
 					if (wget(0, 1, "dynamic.zoneedit.com", "/checkip.html", NULL, 0, &body) != 200) {
-						// Current IP Address: 1.2.3.4
-						error(M_ERROR_GET_IP);
-					}
-				}
-				else if (strcmp(c, "tzo") == 0) {
-					if ((wget(0, 1, "echo.tzo.com:21333", "/ip.shtml", NULL, 0, &body) != 200) &&
-						(wget(0, 1, "echo.tzo.com", "/ip.shtml", NULL, 0, &body) != 200)) {
-						// IPAddress:1.2.3.4
+						/* "1.2.3.4" */
 						error(M_ERROR_GET_IP);
 					}
 				}
 				else if (strcmp(c, "noip") == 0) {
 					if (wget(0, 1, "ip1.dynupdate.no-ip.com", "/", NULL, 0, &body) != 200) {
-						// 1.2.3.4
+						/* "1.2.3.4" */
 						error(M_ERROR_GET_IP);
 					}
 				}
 				else if (strcmp(c, "dnsomatic") == 0) {
 					if (wget(0, 1, "myip.dnsomatic.com", "/", NULL, 0, &body) != 200) {
-						// 1.2.3.4
+						/* "1.2.3.4" */
 						error(M_ERROR_GET_IP);
 					}
 				}
-				else if (strcmp(c, "pairnic") == 0) {
-					if (wget(0, 1, "myip.pairnic.com", "/", NULL, 0, &body) != 200) {
-						// Current IP Address: 1.2.3.4
-						error(M_ERROR_GET_IP);
-					}
-				}
-				else if (strcmp(c, "ovh") == 0) {
-					if (wget(0, 1, "www.ovh.com", "/", NULL, 0, &body) != 200) {
-						// Current IP Address: 1.2.3.4
+				else if (strcmp(c, "pairdomains") == 0) {
+					if (wget(0, 1, "myip.pairnic.com", "/", NULL, 0, &body) != 200) {	/* myip.pairdomains.com redirects to https */
+						/* "Current IP Address: 1.2.3.4" */
 						error(M_ERROR_GET_IP);
 					}
 				}
 				else if (strcmp(c, "changeip") == 0) {
-					if (wget(0, 1, "nic.changeip.com", "/", NULL, 0, &body) != 200) {
-						// Current IP Address: 1.2.3.4
+					if (wget(0, 1, "ip.changeip.com", "/", NULL, 0, &body) != 200) {
+						/* "1.2.3.4\n<!--IPADDR=1.2.3.4-->" */
 						error(M_ERROR_GET_IP);
 					}
 				}
 
+				mdulog(LOG_INFO, "%s: external IP checker - '%s'\n", __FUNCTION__, c);
+
 				if ((p = strstr(body, "Address:")) != NULL) {
-					// dyndns, zoneedit, tzo, pairnic, ovh, changeip
-					p += 8;	// note: tzo doesn't have a space
+					/* dyndns, pairdomains */
+					p += 8;
 				}
 				else {
-					// noip, dnsomatic
+					/* zoneedit, noip, dnsomatic, changeip */
 					p = body;
 				}
 
@@ -513,15 +750,16 @@ const char *get_address(int required)
 
 				q = p;
 				while (((*q >= '0') && (*q <= '9')) || (*q == '.')) ++q;
-				*q = 0;
+				strncpy(addr, p, (q - p));
+				q = NULL;
 
-				if ((ia.s_addr = inet_addr(p)) != -1) {
+				if ((ia.s_addr = inet_addr(addr)) != -1) {
 					q = inet_ntoa(ia);
-					sprintf(s, "%ld,%s", ut + (10 * 60), p);
+					sprintf(s, "%ld,%s", ut + (10 * 60), q);
 					f_write_string(cache_name, s, 0, 0);
 
-					_dprintf("%s: saved '%s'\n", __FUNCTION__, s);
-					return p;
+					mdulog(LOG_INFO, "%s: saved '%s'\n", __FUNCTION__, s);
+					return q;
 				}
 			}
 			error(M_ERROR_GET_IP);
@@ -644,6 +882,7 @@ static void update_dua(const char *type, int ssl, const char *server, const char
 		error(M_UNKNOWN_RESPONSE__D, -1);
 		break;
 	case 401:
+	case 403:
 		error(M_INVALID_AUTH);
 		break;
 	}
@@ -713,7 +952,7 @@ bad:
 <debug><![CDATA[]]></debug>
 </interface-response>"
 */
-static void update_namecheap(void)
+static void update_namecheap(int ssl)
 {
 	int r;
 	char *p;
@@ -728,7 +967,7 @@ static void update_namecheap(void)
 	// +opt
 	append_addr_option(query, "&ip=%s");
 
-	r = wget(0, 0, "dynamicdns.park-your-domain.com", query, NULL, 0, &body);
+	r = wget(ssl, 0, "dynamicdns.park-your-domain.com", query, NULL, 0, &body);
 	if (r == 200) {
 		if (strstr(body, "<ErrCount>0<")) {
 			success();
@@ -791,7 +1030,7 @@ TimeDifference=+08.00
 ExecTime=0.235
 Done=true
 */
-static void update_enom(void)
+static void update_enom(int ssl)
 {
 	int r;
 	char *p;
@@ -808,7 +1047,7 @@ static void update_enom(void)
 	// +opt
 	append_addr_option(query, "&Address=%s");
 
-	r = wget(0, 0, "dynamic.name-services.com", query, NULL, 0, &body);
+	r = wget(ssl, 0, "dynamic.name-services.com", query, NULL, 0, &body);
 	if (r == 200) {
 		if (strstr(body, "ErrCount=0")) {
 			success();
@@ -848,20 +1087,20 @@ static void update_enom(void)
 
 " HTTP/1.1 200 OK" <-- extra in body?
 */
-static void update_dnsexit(void)
+static void update_dnsexit(int ssl)
 {
 	int r;
 	char *body;
 	char query[2048];
 
 	// +opt +opt +opt
-	sprintf(query, "/RemoteUpdate.sv?action=edit&login=%s&password=%s&host=%s",
+	sprintf(query, "/RemoteUpdate.sv?login=%s&password=%s&host=%s",
 		get_option_required("user"), get_option_required("pass"), get_option_required("host"));
 
 	// +opt
 	append_addr_option(query, "&myip=%s");
 
-	r = wget(0, 0, "www.dnsexit.com", query, NULL, 0, &body);
+	r = wget(ssl, 0, "update.dnsexit.com", query, NULL, 0, &body);
 	if (r == 200) {
 		// (\d+)=.+
 
@@ -917,7 +1156,7 @@ static void update_noip_refresh(void)
 	username = hostname
 	domain = dip.jp, fam.cx, etc.
 */
-static void update_ieserver(void)
+static void update_ieserver(int ssl)
 {
 	int r;
 	char *body;
@@ -928,7 +1167,7 @@ static void update_ieserver(void)
 	sprintf(query, "/cgi-bin/dip.cgi?username=%s&domain=%s&password=%s&updatehost=1",
 		get_option_required("user"), get_option_required("host"), get_option_required("pass"));
 
-	r = wget(0, 0, "ieserver.net", query, NULL, 0, &body);
+	r = wget(ssl, 0, "ieserver.net", query, NULL, 0, &body);
 	if (r == 200) {
 		if (strstr(body, "<title>Error")) {
 
@@ -957,7 +1196,7 @@ static void update_ieserver(void)
 
 401 testuser not authenticated"
 */
-static void update_dyns(void)
+static void update_dyns(int ssl)
 {
 	int r;
 	char *body;
@@ -975,7 +1214,7 @@ static void update_dyns(void)
 	sprintf(query + strlen(query), "&devel=1");
 #endif
 
-	r = wget(0, 0, "www.dyns.net", query, NULL, 0, &body);
+	r = wget(ssl, 0, "www.dyns.net", query, NULL, 0, &body);
 	if (r == 200) {
 		while ((*body == ' ') || (*body == '\r') || (*body == '\n')) {
 			++body;
@@ -999,86 +1238,6 @@ static void update_dyns(void)
 		}
 
 		error(M_UNKNOWN_RESPONSE__D, r);
-	}
-
-	error(M_UNKNOWN_ERROR__D, r);
-}
-
-/*
-	TZO
-	http://www.tzo.com/
-
-	---
-
-"HTTP/1.1 200 OK
-...
-
-                <td valign="top"><font size="4">Congratulations!
-                You've successfully signed on with TZO.<br>
-                </font><h1 align="center"><font size="2"
-                face="Verdana">Here's information about your
-                account:</font><br>
-                </h1>
-                <h3 align="center"><font face="Verdana"><p>TZO Name: foobartest.tzo.com<br>
-IP Address: 1.2.3.4<br>
-Expiration: 2007-01-01 1:01:01</p>
-</font> <br>
-
-..."
-
-
-Invalid hostname or password:
-"HTTP/1.1 200 OK
-...
-
-                <td valign="top"><font size="4">Congratulations!
-                You've successfully signed on with TZO.<br>
-                </font><h1 align="center"><font size="2"
-                face="Verdana">Here's information about your
-                account:</font><br>
-                </h1>
-                <h3 align="center"><font face="Verdana"><p>Error=bad authentication
-</p>
-..."
-
-
-Update too soon:
-"...
-                face="Verdana">Here's information about your
-                account:</font><br>
-                </h1>
-                <h3 align="center"><font face="Verdana"><p>Error=Try again later. Please wait at least 1 minute before any additional requests.1.2.3.4
-</p>
-</font> <br>
-..."
-*/
-static void update_tzo(void)
-{
-	int r;
-	char *body;
-	char query[2048];
-	char *p;
-
-	// +opt +opt +opt
-	sprintf(query, "/webclient/signedon.html?TZOName=%s&Email=%s&TZOKey=%s",
-		get_option_required("host"), get_option_required("user"), get_option_required("pass"));
-
-	// +opt
-	append_addr_option(query, "&IPAddress=%s");
-
-	r = wget(0, 0, "cgi.tzo.com", query, NULL, 0, &body);
-	if (r == 200) {
-		if ((p = strstr(body, "Error=")) != NULL) {
-			p += 6;
-			if (strncmp(p, "bad auth", 8) == 0) {
-				error(M_INVALID_AUTH);
-			}
-			if (strncmp(p, "Try again", 9) == 0) {
-				error(M_TOOSOON);
-			}
-			error(M_UNKNOWN_ERROR__D, -1);
-		}
-		success();
 	}
 
 	error(M_UNKNOWN_ERROR__D, r);
@@ -1138,6 +1297,9 @@ static void update_zoneedit(int ssl)
 			case 701:	// invalid "zone"
 				error(M_INVALID_HOST);
 				break;
+			case 702:
+				error(M_TOOSOON);
+				break;
 			case 707:	// update is the same ip address? / too frequent updates
 				if (strstr(c, "Duplicate"))
 					success();
@@ -1146,6 +1308,9 @@ static void update_zoneedit(int ssl)
 				break;
 			case 708:	// authorization error
 				error(M_INVALID_AUTH);
+				break;
+			case 709:
+				error(M_INVALID_HOST);
 				break;
 			}
 			error(M_UNKNOWN_RESPONSE__D, r);
@@ -1197,143 +1362,6 @@ static void update_afraid(int ssl)
 				success();
 			}
 			error(M_INVALID_AUTH);
-		}
-		else {
-			error(M_UNKNOWN_RESPONSE__D, -1);
-		}
-	}
-
-	error(M_UNKNOWN_ERROR__D, r);
-}
-
-/*
-	everydns.net
-
-HTTP/1.1 200 OK
-Server: Apache
-X-Powered-By: PHP/5.0.1-dev
-Connection: close
-Content-Type: text/html; charset=utf-8
-
-Authentication given
-Authentication failed: Bad Username/password
-Exit code: 2
-*/
-static void update_everydns(void)
-{
-	int r;
-	char *body;
-	char query[2048];
-	const char *p;
-
-	strcpy(query, "/index.php?ver=0.1");
-	append_addr_option(query, "&ip=%s");
-
-	p = get_option("host");
-	if (p) sprintf(query + strlen(query), "&domain=%s", p);
-
-	r = wget(0, 0, "dyn.everydns.net", query, NULL, 1, &body);
-	if (r == 200) {
-		if ((p = strstr(body, "Exit code:")) != NULL) {
-			r = atoi(p + 10);
-			switch (r) {
-			case 0:
-				success();
-				break;
-			case 2:
-				error(M_INVALID_AUTH);
-				break;
-			default:
-				error(M_UNKNOWN_RESPONSE__D, r);
-				break;
-			}
-		}
-		error(M_UNKNOWN_RESPONSE__D, -1);
-	}
-
-	error(M_UNKNOWN_ERROR__D, r);
-}
-
-/*
-	miniDNS.net
-	http://www.minidns.net/areg.php?opcode=ADD&host=bar.minidns.net&username=foo&password=topsecret&ip=1.2.3.4
-
-	---
-
-"okay. BAR.MINIDNS.NET mapped to 1.2.3.4."
-"auth_fail. Incorrect username/password/hostname."
-"auth_fail. Host name format error."
-*/
-static void update_minidns(void)
-{
-	int r;
-	char *body;
-	char query[2048];
-
-	// +opt +opt +opt
-	sprintf(query, "/areg.php?opcode=ADD&host=%s&username=%s&password=%s",
-		get_option_required("host"),
-		get_option_required("user"),
-		get_option_required("pass"));
-
-	// +opt
-	append_addr_option(query, "&ip=%s");
-
-	r = wget(0, 0, "www.minidns.net", query, NULL, 1, &body);
-	if (r == 200) {
-		if (strstr(body, "okay.")) {
-			success();
-		}
-		else if (strstr(body, "Host name format error")) {
-			error(M_INVALID_HOST);
-		}
-		else if (strstr(body, "auth_fail")) {
-			error(M_INVALID_AUTH);
-		}
-		else {
-			error(M_UNKNOWN_RESPONSE__D, -1);
-		}
-	}
-
-	error(M_UNKNOWN_ERROR__D, r);
-}
-
-/*
-	editdns.net
-	http://www.editdns.net/
-
-	source: Keith M.
-
-	---
-
-	http://DynDNS.EditDNS.net/api/dynLinux.php?p=XXX&r=XXX
-
-	p = password
-	r = hostname
-*/
-static void update_editdns(void)
-{
-	int r;
-	char *body;
-	char query[2048];
-
-	// +opt +opt
-	sprintf(query, "/api/dynLinux.php?p=%s&r=%s",
-		get_option_required("pass"), get_option_required("host"));
-
-	r = wget(0, 1, "DynDNS.EditDNS.net", query, NULL, 0, &body);
-	if (r == 200) {
-		if (strstr(body, "Record has been updated")) {
-			success();
-		}
-		if (strstr(body, "Record already exists")) {
-			error(M_SAME_IP);
-		}
-		else if (strstr(body, "Invalid Username")) {
-			error(M_INVALID_AUTH);
-		}
-		else if (strstr(body, "Invalid DynRecord")) {
-			error(M_INVALID_HOST);
 		}
 		else {
 			error(M_UNKNOWN_RESPONSE__D, -1);
@@ -1434,11 +1462,11 @@ static int cloudflare_errorcheck(int code, const char *req, char *body)
 	else if (code == 403 && strstr(body, "\"code\":9103") != NULL)
 		error(M_INVALID_AUTH);
 
-	error("%s returned HTTP code %d.", req, code);
+	error("%s returned HTTP error code %d.", req, code);
 	return -1; // silence compiler warning
 }
 
-static void update_cloudflare(void)
+static void update_cloudflare(int ssl)
 {
 	char header[HALF_BLOB];
 	const char *zone;
@@ -1468,7 +1496,7 @@ static void update_cloudflare(void)
 			"type=A&name=%s&order=name&direction=asc",
 			zone, host);
 
-	r = wget(1, 1, "api.cloudflare.com", query, header, 0, &body);
+	r = wget(ssl, 1, "api.cloudflare.com", query, header, 0, &body);
 	r = cloudflare_errorcheck(r, "GET", body);
 	req = "PUT";
 	addr = get_address(1);
@@ -1575,7 +1603,7 @@ static void update_wget(void)
 
 	if ((c = strrchr(host, '@')) != NULL) {
 		*c = 0;
-		s[base64_encode((unsigned char *) host, s, c - host)] = 0;
+		s[base64_encode((const char *) host, s, c - host)] = 0;
 		sprintf(he, "Authorization: Basic %s\r\n", s);
 		header = he;
 		host = c + 1;
@@ -1608,60 +1636,22 @@ static void check_cookie(void)
 	long tm;
 
 	if (((c = get_option("cookie")) == NULL) || (!read_tmaddr(c, &tm, addr))) {
-		_dprintf("%s: no cookie\n", __FUNCTION__);
+		mdulog(LOG_INFO, "%s: no cookie\n", __FUNCTION__);
 		refresh = 1;
 		return;
 	}
 
 	if ((c = get_address(0)) == NULL) {
-		_dprintf("%s: no address specified\n", __FUNCTION__);
+		mdulog(LOG_INFO, "%s: no address specified\n", __FUNCTION__);
 		return;
 	}
 	if (strcmp(c, addr) != 0) {
-		_dprintf("%s: address is different (%s != %s)\n", __FUNCTION__, c, addr);
+		mdulog(LOG_INFO, "%s: address is different (%s != %s)\n", __FUNCTION__, c, addr);
 		return;
 	}
-
-#if 0
-	long now;
-	long u;
-
-	now = time(NULL);
-	if ((now < Y2K) || (now < tm)) {
-		_dprintf("%s: time rolled back (now=%ld, tm=%ld)\n", __FUNCTION__, now, tm);
-		return;
-	}
-	tm = now - tm;
-
-	_dprintf("%s: addr=%s tm=%ld (relative)\n", __FUNCTION__, addr, tm);
-
-	if ((c = get_option("maxtime")) != NULL) {
-		u = strtol(c, NULL, 0);
-		if (u > 0) {
-			if (tm > u) {
-				_dprintf("%s: %s expired (%ld > %ld)\n", __FUNCTION__, addr, tm, u);
-				return;
-			}
-			_dprintf("%s: maxtime=%ld tm=%ld\n", __FUNCTION__, u, tm);
-
-			puts(M_TOOSOON);
-			exit(3);
-		}
-	}
-
-	if ((c = get_option("mintime")) != NULL) {
-		u = strtol(c, NULL, 0);
-		if ((u > 0) && (tm < u)) {
-			_dprintf("%s: %s recently updated (%ld < %ld)\n", __FUNCTION__, addr, tm, u);
-
-			puts(M_TOOSOON);
-			exit(3);
-		}
-	}
-
-#endif
 
 	puts(M_SAME_IP);
+
 	exit(3);
 }
 
@@ -1674,24 +1664,24 @@ static void save_cookie(void)
 
 	now = time(NULL);
 	if (now < Y2K) {
-		_dprintf("%s: no time", __FUNCTION__);
+		mdulog(LOG_INFO, "%s: no time", __FUNCTION__);
 		return;
 	}
 
 	if ((cookie = get_option("cookie")) == NULL) {
-		_dprintf("%s: no cookie\n", __FUNCTION__);
+		mdulog(LOG_INFO, "%s: no cookie\n", __FUNCTION__);
 		return;
 	}
 
 	if ((c = get_address(0)) == NULL) {
-		_dprintf("%s: no address specified\n", __FUNCTION__);
+		mdulog(LOG_INFO, "%s: no address specified\n", __FUNCTION__);
 		return;
 	}
 
 	sprintf(s, "%ld,%s", now, c);
 	f_write_string(cookie, s, FW_NEWLINE, 0);
 
-	_dprintf("%s: cookie=%s\n", __FUNCTION__, s);
+	mdulog(LOG_INFO, "%s: cookie=%s\n", __FUNCTION__, s);
 }
 
 int main(int argc, char *argv[])
@@ -1702,7 +1692,6 @@ int main(int argc, char *argv[])
 	g_argv = argv;
 
 	printf("MDU\nCopyright (C) 2007-2009 Jonathan Zarate\n\n");
-	_dprintf("DEBUG\n");
 
 	if ((blob = malloc(BLOB_SIZE)) == NULL) {
 		return 1;
@@ -1710,19 +1699,97 @@ int main(int argc, char *argv[])
 
 	mkdir("/var/lib/mdu", 0700);
 	chdir("/var/lib/mdu");
-/*
-	if ((p = get_dump_name()) != NULL) {
-		unlink(p);
-	}
-*/
+
+#ifdef USE_LIBCURL
+	curl_setup();
+#endif
+
 	check_cookie();
 
 	p = get_option_required("service");
-	if (strcmp(p, "dua") == 0) {
-		update_dua("dyndns", 0, NULL, NULL, 1);
+
+#ifdef TCONFIG_HTTPS
+	if (strcmp(p, "changeip") == 0) {
+		update_dua("dyndns", 1, "nic.changeip.com", "/nic/update", 1);
 	}
-	else if (strcmp(p, "duas") == 0) {
-		update_dua("dyndns", 1, NULL, NULL, 1);
+	else if (strcmp(p, "cloudflare") == 0) {
+		update_cloudflare(1);
+	}
+	else if (strcmp(p, "dnsexit") == 0) {
+		update_dnsexit(1);
+	}
+	else if (strcmp(p, "dnshenet") == 0) {
+		update_dua(NULL, 1, "dyn.dns.he.net", "/nic/update", 0);
+	}
+	else if (strcmp(p, "dnsomatic") == 0) {
+		update_dua(NULL, 1, "updates.dnsomatic.com", "/nic/update", 0);
+	}
+	else if (strcmp(p, "dyndns") == 0) {
+		update_dua("dyndns", 1, "members.dyndns.org", "/nic/update", 1);
+	}
+	else if (strcmp(p, "dyndns-static") == 0) {
+		update_dua("statdns", 1, "members.dyndns.org", "/nic/update", 1);
+	}
+	else if (strcmp(p, "dyndns-custom") == 0) {
+		update_dua("custom", 1, "members.dyndns.org", "/nic/update", 1);
+	}
+	else if (strcmp(p, "dyns") == 0) {
+		update_dyns(0);			/* no https */
+	}
+	else if (strcmp(p, "easydns") == 0) {
+		update_dua(NULL, 1, "members.easydns.com", "/dyn/dyndns.php", 1);
+	}
+	else if (strcmp(p, "enom") == 0) {
+		update_enom(0);			/* bad cert */
+	}
+	else if (strcmp(p, "afraid") == 0) {
+		update_afraid(1);
+	}
+	else if (strcmp(p, "heipv6tb") == 0) {
+		update_dua("heipv6tb", 1, "ipv4.tunnelbroker.net", "/nic/update", 1);
+	}
+	else if (strcmp(p, "ieserver") == 0) {
+		update_ieserver(1);		/* TLS 1.0 only... */
+	}
+	else if (strcmp(p, "namecheap") == 0) {
+		update_namecheap(1);
+	}
+	else if (strcmp(p, "noip") == 0) {
+		update_dua(NULL, 1, "dynupdate.no-ip.com", "/nic/update", 1);
+	}
+	else if (strcmp(p, "opendns") == 0) {
+		update_dua(NULL, 1, "updates.opendns.com", "/nic/update", 0);
+	}
+	else if (strcmp(p, "ovh") == 0) {
+		update_dua("dyndns", 1, "www.ovh.com", "/nic/update", 1);
+	}
+	else if (strcmp(p, "pairdomains") == 0) {
+		update_dua(NULL, 1, "dynamic.pairdomains.com", "/nic/update", 1);
+	}
+	else if (strcmp(p, "pubyun") == 0) {
+		update_dua(NULL, 0, "members.3322.org", "/dyndns/update", 1);	/* bad cert */
+	}
+	else if (strcmp(p, "pubyun-static") == 0) {
+		update_dua("statdns", 0, "members.3322.org", "/dyndns/update", 1);	/* bad cert */
+	}
+	else if (strcmp(p, "zoneedit") == 0) {
+		update_zoneedit(1);
+	}
+#else
+	if (strcmp(p, "changeip") == 0) {
+		update_dua("dyndns", 0, "nic.changeip.com", "/nic/update", 1);
+	}
+	else if (strcmp(p, "cloudflare") == 0) {
+		update_cloudflare(0);
+	}
+	else if (strcmp(p, "dnsexit") == 0) {
+		update_dnsexit(0);
+	}
+	else if (strcmp(p, "dnshenet") == 0) {
+		update_dua(NULL, 0, "dyn.dns.he.net", "/nic/update", 0);
+	}
+	else if (strcmp(p, "dnsomatic") == 0) {
+		update_dua(NULL, 0, "updates.dnsomatic.com", "/nic/update", 0);
 	}
 	else if (strcmp(p, "dyndns") == 0) {
 		update_dua("dyndns", 0, "members.dyndns.org", "/nic/update", 1);
@@ -1733,112 +1800,59 @@ int main(int argc, char *argv[])
 	else if (strcmp(p, "dyndns-custom") == 0) {
 		update_dua("custom", 0, "members.dyndns.org", "/nic/update", 1);
 	}
-	else if (strcmp(p, "sdyndns") == 0) {
-		update_dua("dyndns", 1, "members.dyndns.org", "/nic/update", 1);
-	}
-	else if (strcmp(p, "sdyndns-static") == 0) {
-		update_dua("statdns", 1, "members.dyndns.org", "/nic/update", 1);
-	}
-	else if (strcmp(p, "sdyndns-custom") == 0) {
-		update_dua("custom", 1, "members.dyndns.org", "/nic/update", 1);
+	else if (strcmp(p, "dyns") == 0) {
+		update_dyns(0);
 	}
 	else if (strcmp(p, "easydns") == 0) {
 		update_dua(NULL, 0, "members.easydns.com", "/dyn/dyndns.php", 1);
 	}
-	else if (strcmp(p, "seasydns") == 0) {
-		update_dua(NULL, 1, "members.easydns.com", "/dyn/dyndns.php", 1);
-	}
-	else if (strcmp(p, "3322") == 0) {
-		update_dua(NULL, 0, "members.3322.org", "/dyndns/update", 1);
-	}
-	else if (strcmp(p, "3322-static") == 0) {
-		update_dua("statdns", 0, "members.3322.org", "/dyndns/update", 1);
-	}
-	else if (strcmp(p, "opendns") == 0) {
-		update_dua(NULL, 1, "updates.opendns.com", "/nic/update", 0);
-	}
-	else if (strcmp(p, "dnsomatic") == 0) {
-		update_dua(NULL, 1, "updates.dnsomatic.com", "/nic/update", 0);
-	}
-	else if (strcmp(p, "noip") == 0) {
-		update_dua(NULL, 0, "dynupdate.no-ip.com", "/nic/update", 1);
-	}
-	else if (strcmp(p, "namecheap") == 0) {
-		update_namecheap();
-	}
 	else if (strcmp(p, "enom") == 0) {
-		update_enom();
-	}
-	else if (strcmp(p, "dnsexit") == 0) {
-		update_dnsexit();
-	}
-	else if (strcmp(p, "ieserver") == 0) {
-		update_ieserver();
-	}
-	else if (strcmp(p, "dyns") == 0) {
-		update_dyns();
-	}
-	else if (strcmp(p, "tzo") == 0) {
-		update_tzo();
-	}
-	else if (strcmp(p, "zoneedit") == 0) {
-		update_zoneedit(0);
-	}
-	else if (strcmp(p, "szoneedit") == 0) {
-		update_zoneedit(1);
+		update_enom(0);
 	}
 	else if (strcmp(p, "afraid") == 0) {
 		update_afraid(0);
 	}
-	else if (strcmp(p, "safraid") == 0) {
-		update_afraid(1);
-	}
-	else if (strcmp(p, "everydns") == 0) {
-		update_everydns();
-	}
-	else if (strcmp(p, "editdns") == 0) {
-		update_editdns();
-	}
-	else if (strcmp(p, "minidns") == 0) {
-		update_minidns();
-	}
-	else if (strcmp(p, "pairnic") == 0) {
-		// pairNIC uses the same API as DynDNS
-		update_dua("pairnic", 0, "dynamic.pairnic.com", "/nic/update", 1);
-	}
-	else if (strcmp(p, "spairnic") == 0) {
-		// pairNIC uses the same API as DynDNS
-		update_dua("pairnic", 1, "dynamic.pairnic.com", "/nic/update", 1);
-	}
-	else if (strcmp(p, "ovh") == 0) {
-		// OVH uses the same API as DynDNS
-		update_dua("dyndns", 0, "www.ovh.com", "/nic/update", 1);
-	}
-	else if (strcmp(p, "sovh") == 0) {
-		// OVH uses the same API as DynDNS
-		update_dua("dyndns", 1, "www.ovh.com", "/nic/update", 1);
-	}
-	else if (strcmp(p, "schangeip") == 0) {
-		// ChangeIP uses the same API as DynDNS
-		update_dua("dyndns", 1, "nic.changeip.com", "/nic/update", 1);
-	}
 	else if (strcmp(p, "heipv6tb") == 0) {
-		// Tunnel Broker uses the same API as DynDNS
-		update_dua("heipv6tb", 0, "ipv4.tunnelbroker.net", "/nic/update", 1);
-	}
-	else if (strcmp(p, "sheipv6tb") == 0) {
-		// Tunnel Broker uses the same API as DynDNS
 		update_dua("heipv6tb", 1, "ipv4.tunnelbroker.net", "/nic/update", 1);
 	}
-	else if (strcmp(p, "cloudflare") == 0) {
-		update_cloudflare();
+	else if (strcmp(p, "ieserver") == 0) {
+		update_ieserver(0);
 	}
+	else if (strcmp(p, "namecheap") == 0) {
+		update_namecheap(0);
+	}
+	else if (strcmp(p, "noip") == 0) {
+		update_dua(NULL, 0, "dynupdate.no-ip.com", "/nic/update", 1);
+	}
+	else if (strcmp(p, "opendns") == 0) {
+		update_dua(NULL, 0, "updates.opendns.com", "/nic/update", 0);
+	}
+	else if (strcmp(p, "ovh") == 0) {
+		update_dua("dyndns", 0, "www.ovh.com", "/nic/update", 1);
+	}
+	else if (strcmp(p, "pairdomains") == 0) {
+		update_dua(NULL, 0, "dynamic.pairdomains.com", "/nic/update", 1);
+	}
+	else if (strcmp(p, "pubyun") == 0) {
+		update_dua(NULL, 0, "members.3322.org", "/dyndns/update", 1);
+	}
+	else if (strcmp(p, "pubyun-static") == 0) {
+		update_dua("statdns", 0, "members.3322.org", "/dyndns/update", 1);
+	}
+	else if (strcmp(p, "zoneedit") == 0) {
+		update_zoneedit(0);
+	}
+#endif
 	else if ((strcmp(p, "wget") == 0) || (strcmp(p, "custom") == 0)) {
 		update_wget();
 	}
 	else {
 		error("Unknown service");
 	}
+
+#ifdef USE_LIBCURL
+	curl_cleanup();
+#endif
 
 	return 1;
 }

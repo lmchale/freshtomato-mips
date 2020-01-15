@@ -223,7 +223,7 @@ int do_led(int which, int mode)
 	static int wrt310nv1[]	= { 255,    1,     9,    3,  255,  255,  255,  255,    255};
 	static int wrt160nv1[]	= { 255,    1,     5,    3,  255,  255,  255,  255,    255};
 #ifdef CONFIG_BCMWL5
-	static int wnr3500[]	= { 255,  255,     2,  255,  255,   -1,  255,  255,    255};
+	static int wnr3500[]	= { 255,  255,    -2,  255,  255,   -1,  255,  255,    255};
 	static int wnr2000v2[]	= { 255,  255,   255,  255,  255,   -7,  255,  255,    255};
 	static int wndr4000[]	= {   3,    1,     0,    1,  255,    6,  255,    5,      4};
 	static int wndr3400[]	= {  -9,   -7,    -3,   -7,  255,  255,  255,    2,    -99}; /* Note: 5 = Switch, 4 = Reset button, 8 = SES button */
@@ -247,7 +247,7 @@ int do_led(int which, int mode)
 	static int w1800r[]	= { 255,  -13,   255,  255,  255,  255,  255,  -12,     -5};
 	static int d1800h[]	= { -12,  -13,     8,  255,  255,  -10,  255,   15,     11};
 	static int tdn6[]	= { 255,   -6,     8,  255,  255,  255,  255,  255,    255};
-	static int tdn60[]	= { 255,   -6,     8,  255,  255,  255,  255,    9,    255};
+	static int tdn60[]	= { 255,   -6,   255,  255,  255,  255,  255,    9,    255};
 	static int r6300v1[]	= {  11,    3,   255,  255,  255,  255,  255,    8,     11};
 	static int wndr4500[]	= {   9,    3,     2,    3,  255,  255,  255,   14,     11};
 #endif
@@ -390,9 +390,8 @@ int do_led(int which, int mode)
 	case MODEL_WNR3500L:
 	case MODEL_WNR3500LV2:
 		if (which == LED_DIAG) {
-			/* power led gpio: 0x03 - green, 0x07 - amber */
-			b = (mode) ? 7 : 3;
-			c = (mode) ? 3 : 7;
+			b = 3; /* gpio 3 actice HIGH AND gpio 7 active LOW  ==> result: Power LED on green; for amber --> inverted */
+			c = 7;
 		} else
 			b = wnr3500[which];
 		break;

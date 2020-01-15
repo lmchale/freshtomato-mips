@@ -316,19 +316,7 @@ ifeq ($(WNDR),y)
 	# and tee only reads from stdout (not stderr)
 	@echo "*********************** Convert TRX to CHK (add Netgear Checksum) ************************" >>fpkg.log
 	# Make multiple versions / files, as file is HW specific (HW information is captured in the .chk file itself!)
- ifeq ($(USBAP),)
-	# Make WNDR3700v3, Checksum starts at 0x6FFFF8 => Max size (to not touch the last 64kB block) = 7274496
-	@$(SRCBASE)/wnrtool/mkchkimg -o image/freshtomato-WNDR3700v3-$(ND)$(current_BUILD_USB)$(if $(filter $(NVRAM_SIZE),0),,-NVRAM$(NVRAM_SIZE)K)$(RT_SUFFIX)-$(mips_rev)-$(current_TOMATO_VER)$(beta)$(V2)-$(current_BUILD_DESC).chk \
-	-k image/freshtomato-$(ND)$(current_BUILD_USB)$(if $(filter $(NVRAM_SIZE),0),,-NVRAM$(NVRAM_SIZE)K)$(RT_SUFFIX)-$(mips_rev)-$(current_TOMATO_VER)$(beta)$(V2)-$(current_BUILD_DESC).trx \
-	-b U12H194T00_NETGEAR -r 2 2>&1 | tee -a fpkg.log
-	@$(MAKE) netgear-check MAXFSIZE=7274496 NG_FNAME=image/freshtomato-WNDR3700v3-$(ND)$(current_BUILD_USB)$(if $(filter $(NVRAM_SIZE),0),,-NVRAM$(NVRAM_SIZE)K)$(RT_SUFFIX)-$(mips_rev)-$(current_TOMATO_VER)$(beta)$(V2)-$(current_BUILD_DESC).chk
-
-	# Make WNDR3400, Checksum starts at 0x6CFFF8 => Max size (to not touch the last 64kB block) = 7077888
-	@$(SRCBASE)/wnrtool/mkchkimg -o image/freshtomato-WNDR3400-$(ND)$(current_BUILD_USB)$(if $(filter $(NVRAM_SIZE),0),,-NVRAM$(NVRAM_SIZE)K)$(RT_SUFFIX)-$(mips_rev)-$(current_TOMATO_VER)$(beta)$(V2)-$(current_BUILD_DESC).chk \
-	-k image/freshtomato-$(ND)$(current_BUILD_USB)$(if $(filter $(NVRAM_SIZE),0),,-NVRAM$(NVRAM_SIZE)K)$(RT_SUFFIX)-$(mips_rev)-$(current_TOMATO_VER)$(beta)$(V2)-$(current_BUILD_DESC).trx \
-	-b U12H155T00_NETGEAR -r 2 2>&1 | tee -a fpkg.log
-	@$(MAKE) netgear-check MAXFSIZE=7077888 NG_FNAME=image/freshtomato-WNDR3400-$(ND)$(current_BUILD_USB)$(if $(filter $(NVRAM_SIZE),0),,-NVRAM$(NVRAM_SIZE)K)$(RT_SUFFIX)-$(mips_rev)-$(current_TOMATO_VER)$(beta)$(V2)-$(current_BUILD_DESC).chk
- else
+ ifeq ($(USBAP),y)
 	# Make WNDR3400v2, Checksum starts at 0x6FFFF8 => Max size (to not touch the last 64kB block) = 7274496
 	@$(SRCBASE)/wnrtool/mkchkimg -o image/freshtomato-WNDR3400v2-$(ND)$(current_BUILD_USB)$(if $(filter $(NVRAM_SIZE),0),,-NVRAM$(NVRAM_SIZE)K)$(RT_SUFFIX)-$(mips_rev)-$(current_TOMATO_VER)$(beta)$(V2)-$(current_BUILD_DESC).chk \
 	-k image/freshtomato-$(ND)$(current_BUILD_USB)$(if $(filter $(NVRAM_SIZE),0),,-NVRAM$(NVRAM_SIZE)K)$(RT_SUFFIX)-$(mips_rev)-$(current_TOMATO_VER)$(beta)$(V2)-$(current_BUILD_DESC).trx \
@@ -340,6 +328,18 @@ ifeq ($(WNDR),y)
 	-k image/freshtomato-$(ND)$(current_BUILD_USB)$(if $(filter $(NVRAM_SIZE),0),,-NVRAM$(NVRAM_SIZE)K)$(RT_SUFFIX)-$(mips_rev)-$(current_TOMATO_VER)$(beta)$(V2)-$(current_BUILD_DESC).trx \
 	-b U12H208T00_NETGEAR -r 2 2>&1 | tee -a fpkg.log
 	@$(MAKE) netgear-check MAXFSIZE=7274496 NG_FNAME=image/freshtomato-WNDR3400v3-$(ND)$(current_BUILD_USB)$(if $(filter $(NVRAM_SIZE),0),,-NVRAM$(NVRAM_SIZE)K)$(RT_SUFFIX)-$(mips_rev)-$(current_TOMATO_VER)$(beta)$(V2)-$(current_BUILD_DESC).chk
+ else
+	# Make WNDR3700v3, Checksum starts at 0x6FFFF8 => Max size (to not touch the last 64kB block) = 7274496
+	@$(SRCBASE)/wnrtool/mkchkimg -o image/freshtomato-WNDR3700v3-$(ND)$(current_BUILD_USB)$(if $(filter $(NVRAM_SIZE),0),,-NVRAM$(NVRAM_SIZE)K)$(RT_SUFFIX)-$(mips_rev)-$(current_TOMATO_VER)$(beta)$(V2)-$(current_BUILD_DESC).chk \
+	-k image/freshtomato-$(ND)$(current_BUILD_USB)$(if $(filter $(NVRAM_SIZE),0),,-NVRAM$(NVRAM_SIZE)K)$(RT_SUFFIX)-$(mips_rev)-$(current_TOMATO_VER)$(beta)$(V2)-$(current_BUILD_DESC).trx \
+	-b U12H194T00_NETGEAR -r 2 2>&1 | tee -a fpkg.log
+	@$(MAKE) netgear-check MAXFSIZE=7274496 NG_FNAME=image/freshtomato-WNDR3700v3-$(ND)$(current_BUILD_USB)$(if $(filter $(NVRAM_SIZE),0),,-NVRAM$(NVRAM_SIZE)K)$(RT_SUFFIX)-$(mips_rev)-$(current_TOMATO_VER)$(beta)$(V2)-$(current_BUILD_DESC).chk
+
+	# Make WNDR3400, Checksum starts at 0x6CFFF8 => Max size (to not touch the last 64kB block) = 7077888
+	@$(SRCBASE)/wnrtool/mkchkimg -o image/freshtomato-WNDR3400-$(ND)$(current_BUILD_USB)$(if $(filter $(NVRAM_SIZE),0),,-NVRAM$(NVRAM_SIZE)K)$(RT_SUFFIX)-$(mips_rev)-$(current_TOMATO_VER)$(beta)$(V2)-$(current_BUILD_DESC).chk \
+	-k image/freshtomato-$(ND)$(current_BUILD_USB)$(if $(filter $(NVRAM_SIZE),0),,-NVRAM$(NVRAM_SIZE)K)$(RT_SUFFIX)-$(mips_rev)-$(current_TOMATO_VER)$(beta)$(V2)-$(current_BUILD_DESC).trx \
+	-b U12H155T00_NETGEAR -r 2 2>&1 | tee -a fpkg.log
+	@$(MAKE) netgear-check MAXFSIZE=7077888 NG_FNAME=image/freshtomato-WNDR3400-$(ND)$(current_BUILD_USB)$(if $(filter $(NVRAM_SIZE),0),,-NVRAM$(NVRAM_SIZE)K)$(RT_SUFFIX)-$(mips_rev)-$(current_TOMATO_VER)$(beta)$(V2)-$(current_BUILD_DESC).chk
  endif
 	@echo "Cleanup ...."
 	@cp fpkg.log image/fpkg-$(mips_rev)-$(current_TOMATO_VER)$(beta)$(V2).log
@@ -1110,6 +1110,11 @@ j:
 	@$(MAKE) bin USB="" B=V MULTIWAN=y NO_CIFS=y NO_ZEBRA=y NO_JFFS=y OPENVPN=y OPTIMIZE_SIZE_MORE=y KERN_SIZE_OPT_MORE=y BUILD_DESC="MiniVPN"
 
 
+## MiniVPN2 - for 4MB routers
+j2:
+	@$(MAKE) bin USB="" B=V MULTIWAN=y NO_CIFS=y NO_ZEBRA=y NO_JFFS=y PPTPD=y OPTIMIZE_SIZE_MORE=y KERN_SIZE_OPT_MORE=y BUILD_DESC="MiniVPN2"
+
+
 ## IPv6-VPN with no USB support
 v:
 	@$(MAKE) bin USB="" B=V MULTIWAN=y NO_JFFS=y IPV6SUPP=y OPENVPN=y PPTPD=y KERN_SIZE_OPT=y BUILD_DESC="IPv6-$(VPN)"
@@ -1166,6 +1171,9 @@ r2i:
 
 r2j:
 	@$(MAKE) j MIPS32=r2 NVRAM_SIZE=32
+
+r2j2:
+	@$(MAKE) j2 MIPS32=r2 NVRAM_SIZE=32
 
 r2v:
 	@$(MAKE) v MIPS32=r2 NVRAM_SIZE=32
@@ -1287,14 +1295,14 @@ wndr64:
 	@$(MAKE) bin MIPS32=r2 B=E USB="USB" NO_JFFS=y NO_ZEBRA=y NO_HTTPS=y BBEXTRAS=y USBEXTRAS=y EBTABLES=y NO_CIFS=y IPV6SUPP=y NTFS=y NVRAM_SIZE=64 WNDR=y NO_XXTP=y BCMNAT=y BUILD_DESC="MiniIPv6"
 
 wndr64-vpn:
-	@$(MAKE) bin MIPS32=r2 B=E USB="USB" NO_ZEBRA=y BBEXTRAS=y USBEXTRAS=y EBTABLES=y NO_CIFS=y IPV6SUPP=y NTFS=y OPENVPN=y DNSCRYPT=y NO_SAMBA=y NVRAM_SIZE=64 WNDR=y NO_XXTP=y BCMNAT=y BUILD_DESC="$(VPN)"
+	@$(MAKE) bin MIPS32=r2 B=E USB="USB" NO_ZEBRA=y BBEXTRAS=y USBEXTRAS=y EBTABLES=y NO_CIFS=y IPV6SUPP=y NTFS=y OPENVPN=y STUBBY=y NO_SAMBA=y NVRAM_SIZE=64 WNDR=y NO_XXTP=y BCMNAT=y BUILD_DESC="$(VPN)"
 
 ## Builds with wl_high module
 rtn53:
-	@$(MAKE) bin MIPS32=r2 B=E USB="USB" BBEXTRAS=y EBTABLES=y NO_LIBOPT=y IPV6SUPP=y SNMP=y OPENVPN=y PPTPD=y DNSCRYPT=y TOR=y NOCAT=y USBAP=y NO_USBAPP=y BCMNAT=y BUILD_DESC="RT-N53"
+	@$(MAKE) bin MIPS32=r2 B=E USB="USB" BBEXTRAS=y EBTABLES=y NO_LIBOPT=y IPV6SUPP=y SNMP=y OPENVPN=y PPTPD=y STUBBY=y TOR=y NOCAT=y USBAP=y NO_USBAPP=y BCMNAT=y BUILD_DESC="RT-N53"
 
 e2500:
-	@$(MAKE) bin MIPS32=r2 B=E USB="USB" BBEXTRAS=y EBTABLES=y NO_LIBOPT=y IPV6SUPP=y SNMP=y OPENVPN=y PPTPD=y DNSCRYPT=y TOR=y NOCAT=y USBAP=y NO_USBAPP=y NVRAM_SIZE=32 LINKSYS_E2500=y BCMNAT=y BUILD_DESC="Max"
+	@$(MAKE) bin MIPS32=r2 B=E USB="USB" BBEXTRAS=y EBTABLES=y NO_LIBOPT=y IPV6SUPP=y SNMP=y OPENVPN=y PPTPD=y STUBBY=y TOR=y NOCAT=y USBAP=y NO_USBAPP=y NVRAM_SIZE=32 LINKSYS_E2500=y BCMNAT=y BUILD_DESC="Max"
 
 e3200:
 	@$(MAKE) o MIPS32=r2 USBAP=y NVRAM_SIZE=32 LINKSYS_E3200=y
@@ -1303,13 +1311,13 @@ wndr3400v2:
 	@$(MAKE) bin MIPS32=r2 B=E USB="USB" NO_JFFS=y NO_ZEBRA=y NO_HTTPS=y BBEXTRAS=y USBEXTRAS=y EBTABLES=y NO_CIFS=y IPV6SUPP=y NTFS=y USBAP=y NVRAM_SIZE=64 WNDR=y NO_XXTP=y BCMNAT=y BUILD_DESC="MiniIPv6"
 
 wndr3400v2-vpn:
-	@$(MAKE) bin MIPS32=r2 B=E USB="USB" NO_ZEBRA=y BBEXTRAS=y USBEXTRAS=y EBTABLES=y NO_CIFS=y IPV6SUPP=y NTFS=y OPENVPN=y DNSCRYPT=y NO_SAMBA=y USBAP=y NVRAM_SIZE=64 WNDR=y NO_XXTP=y BCMNAT=y BUILD_DESC="$(VPN)"
+	@$(MAKE) bin MIPS32=r2 B=E USB="USB" NO_ZEBRA=y BBEXTRAS=y USBEXTRAS=y EBTABLES=y NO_CIFS=y IPV6SUPP=y NTFS=y OPENVPN=y STUBBY=y NO_SAMBA=y USBAP=y NVRAM_SIZE=64 WNDR=y NO_XXTP=y BCMNAT=y BUILD_DESC="$(VPN)"
 
 n6:
-	@$(MAKE) bin MIPS32=r2 B=E USB="USB" BBEXTRAS=y EBTABLES=y IPV6SUPP=y TOR=y NOCAT=y OPENVPN=y PPTPD=y DNSCRYPT=y USBAP=y NO_USBAPP=y BCMNAT=y BUILD_DESC="TendaN6"
+	@$(MAKE) bin MIPS32=r2 B=E USB="USB" BBEXTRAS=y EBTABLES=y IPV6SUPP=y TOR=y NOCAT=y OPENVPN=y PPTPD=y STUBBY=y USBAP=y NO_USBAPP=y BCMNAT=y BUILD_DESC="TendaN6"
 
 n60:
-	@$(MAKE) bin MIPS32=r2 B=E USB="USB" BBEXTRAS=y USBEXTRAS=y EBTABLES=y IPV6SUPP=y NTFS=y USBAP=y DNSCRYPT=y BCMNAT=y BUILD_DESC="TendaN60"
+	@$(MAKE) bin MIPS32=r2 B=E USB="USB" BBEXTRAS=y USBEXTRAS=y EBTABLES=y IPV6SUPP=y NTFS=y USBAP=y STUBBY=y BCMNAT=y BUILD_DESC="TendaN60"
 
 n60init:
 	@$(MAKE) bin MIPS32=r2 B=E USB="" NO_JFFS=y NO_ZEBRA=y NO_HTTPS=y NO_CIFS=y NO_XXTP=y NO_SSH=y BCMNAT=y BUILD_DESC="TendaN60-init"
@@ -1320,7 +1328,7 @@ f9k:
 
 # it`s not possible to flash tomato on this router. Maybe in the future.
 ## l600n:
-#	@$(MAKE) bin MIPS32=r2 OPENVPN=y BBEXTRAS=y EBTABLES=y NO_LIBOPT=y IPV6SUPP=y B=E BUILD_DESC="L600N" USB="USB" SNMP=y DNSCRYPT=y PPTPD=y TOR=y NOCAT=y USBAP=y
+#	@$(MAKE) bin MIPS32=r2 OPENVPN=y BBEXTRAS=y EBTABLES=y NO_LIBOPT=y IPV6SUPP=y B=E BUILD_DESC="L600N" USB="USB" SNMP=y STUBBY=y PPTPD=y TOR=y NOCAT=y USBAP=y
 
 
 ## Builds for Asus RT-N66u with 64k NVRAM support
@@ -1455,7 +1463,8 @@ help:
 	@echo "o            Mega-VPN - (Mega plus VPN plus NOCAT minus NFS)"
 	@echo "z            MIPS Release 15F AIO (for routers +8MB flash)"
 	@echo "i            MiniIPv6 - (IPv6 with no USB support minus CIFS and RIPv1/2)"
-	@echo "j            MiniVPN - (VPN with no USB support minus CIFS and RIPv1/2)"
+	@echo "j            MiniVPN - (OpenVPN with no USB support minus CIFS and RIPv1/2)"
+	@echo "j2           MiniVPN - (PPTPD with no USB support minus CIFS and RIPv1/2)"
 	@echo "a            MiniVPN - (with USB support)"
 	@echo "f            Mini - (no USB support minus CIFS and RIPv1/2)"
 	@echo "v            IPv6-VPN (no usb) - (VPN with no USB support)"
@@ -1474,7 +1483,8 @@ help:
 	@echo "r2v          MIPS Release 2 IPv6-VPN (no usb)"
 	@echo "r2m          MIPS Release 2 Max (no usb)"
 	@echo "r2i          MIPS Release 2 MiniIPv6 (for 4MB flash)"
-	@echo "r2j          MIPS Release 2 MiniVPN (for 4MB flash)"
+	@echo "r2j          MIPS Release 2 MiniVPN (OpenVPN; for 4MB flash)"
+	@echo "r2j2         MIPS Release 2 MiniVPN (PPTPD; for 4MB flash)"
 	@echo "r2f          MIPS Release 2 Mini (for netgear)"
 	@echo ""
 	@echo "       Belkin F5D/F7D Series with 8MB Flash"
@@ -1526,9 +1536,9 @@ help:
 	@echo "wndr3400v2-vpn Netgear WNDR3400v2/v3 VPN with wl_high module (dualband support) w/o Samba"
 #	@echo "l600n        Rosewill L600N Build with wl_high module (dualband support)"
 	@echo ""
-	@echo "       Netgear WNDR3400/3700v3 builds
-	@echo "wndr64       Netgear WNDR3400/3700v3 miniIPv6 w/o miniDLNA
-	@echo "wndr64-vpn   Netgear WNDR3400/3700v3 VPN w/o Samba
+	@echo "       Netgear WNDR3400/3700v3 builds"
+	@echo "wndr64       Netgear WNDR3400/3700v3 miniIPv6 w/o miniDLNA"
+	@echo "wndr64-vpn   Netgear WNDR3400/3700v3 VPN w/o Samba"
 	@echo ""
 	@echo "       Netgear WNR3500L v2 builds (128MB Flash)"
 	@echo "v2e          Netgear WNR3500Lv2 build VPN"

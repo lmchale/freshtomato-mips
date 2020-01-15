@@ -515,7 +515,7 @@ address of 0.0.0.0 and its IPv6 equivalent of :: so
 \fB--address=/example.com/#\fP will return NULL addresses for example.com and
 its subdomains. This is partly syntactic sugar for \fB--address=/example.com/0.0.0.0\fP
 and \fB--address=/example.com/::\fP but is also more efficient than including both
-as seperate configuration lines. Note that NULL addresses normally work in the same way as localhost, so beware that clients looking up these names are likely to end up talking to themselves.
+as separate configuration lines. Note that NULL addresses normally work in the same way as localhost, so beware that clients looking up these names are likely to end up talking to themselves.
 .TP
 .B --ipset=/<domain>[/<domain>...]/<ipset>[,<ipset>...]
 Places the resolved IP addresses of queries for one or more domains in
@@ -603,12 +603,9 @@ Return a CAA DNS record, as specified in RFC6844.
 .TP
 .B --cname=<cname>,[<cname>,]<target>[,<TTL>]
 Return a CNAME record which indicates that <cname> is really
-<target>. There are significant limitations on the target; it must be a
-DNS name which is known to dnsmasq from /etc/hosts (or additional
-hosts files), from DHCP, from \fB--interface-name\fP or from another
-.B --cname.
-If the target does not satisfy this
-criteria, the whole cname is ignored. The cname must be unique, but it
+<target>. There is a significant limitation on the target; it must be a
+DNS record which is known to dnsmasq and NOT a DNS record which comes from
+an upstream server. The cname must be unique, but it
 is permissible to have more than one cname pointing to the same target. Indeed
 it's possible to declare multiple cnames to a target in a single line, like so:
 .B --cname=cname1,cname2,target
@@ -677,7 +674,7 @@ given for \fB--add-subnet\fP applies to \fB--add-mac\fP too. An alternative enco
 MAC, as base64, is enabled by adding the "base64" parameter and a human-readable encoding of hex-and-colons is enabled by added the "text" parameter.
 .TP
 .B --add-cpe-id=<string>
-Add an arbitrary identifying string to o DNS queries which are
+Add an arbitrary identifying string to DNS queries which are
 forwarded upstream.
 .TP 
 .B --add-subnet[[=[<IPv4 address>/]<IPv4 prefix length>][,[<IPv6 address>/]<IPv6 prefix length>]]
@@ -751,7 +748,7 @@ fast.
 
 Versions of dnsmasq prior to 2.80 defaulted to not checking unsigned replies, and used 
 .B --dnssec-check-unsigned
-to switch this on. Such configurations will continue to work as before, but those which used the default of no checking will need to be altered to explicitly select no checking. The new default is because switching off checking for unsigned replies is inherently dangerous. Not only does it open the possiblity of forged replies, but it allows everything to appear to be working even when the upstream namesevers do not support DNSSEC, and in this case no DNSSEC validation at all is occuring.
+to switch this on. Such configurations will continue to work as before, but those which used the default of no checking will need to be altered to explicitly select no checking. The new default is because switching off checking for unsigned replies is inherently dangerous. Not only does it open the possiblity of forged replies, but it allows everything to appear to be working even when the upstream namesevers do not support DNSSEC, and in this case no DNSSEC validation at all is occurring.
 .TP
 .B --dnssec-no-timecheck
 DNSSEC signatures are only valid for specified time windows, and should be rejected outside those windows. This generates an
